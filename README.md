@@ -2,6 +2,7 @@
 
 
 ## Customer jenkins image with plugins
+
   oc patch node k8s-node-1 -p '{"spec":{"unschedulable":true}}'
   ZDBQNGtEWVQydEtoUTN4YWtpNDIySGdhVXRNbVlHYkV4dG4wNHNuaA
 
@@ -52,4 +53,5 @@ spec:
     name: quay-edwin
     namespace: openshift-operators
   insecureRegistry: true
+  
   quayHostname: https://quay-registry-quay-quay-enterprise.apps.ocp4-hub.edwin.home
