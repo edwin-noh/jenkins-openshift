@@ -1,0 +1,67 @@
+
+pipeline {
+    agent {
+        node {
+            label 'gradle' 
+        }
+    }
+    stages {
+        stage('checkout') {
+            // when {
+            //     expression {
+            //         return env.preambleResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+            //     }
+            // }
+            steps {            
+                script {
+                    try {
+                        //git branch: "${SRC_REPO_BRANCH}", url: "https://bitbucket.org/kyobobook/${SRC_REPO_NAME}.git", credentialsId: "bitbucket-credentials"
+                        git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
+
+                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        
+                        // def commitMessage = executeCmdReturn('git log -1 --pretty=%B ${git_commit}').split(' ')
+                        //JIRA_ISSUE_KEY = commitMessage[0]
+
+                        //addComment("빌드가 시작되었습니다.")
+                        
+
+                        env.gitCloneResult = true
+                    }
+                    catch(Exception e) {
+                        //cleanWs()
+                        //PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Build Source') {
+            // when {
+            //     expression {
+            //         return env.gitCloneResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+            //     }
+            // }
+            steps {
+                container('gradle') {
+                    script {
+                        try {
+                            // Build Source
+                            //sh "gradle build -x test --stacktrace"
+                            // sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
+                            sh "gradle build -x test --stacktrace"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            // addComment("Build Source 스테이지에서 실패했습니다.")
+                            // cleanWs()
+                            // PrintErrorMessage(e)
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }                
+            }
+
+        }        
+    }
+}

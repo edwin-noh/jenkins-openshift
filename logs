@@ -1,0 +1,84 @@
+Starting the Java application using /opt/jboss/container/java/run/run-java.sh ...
+ERROR Neither $JAVA_MAIN_CLASS nor $JAVA_APP_JAR is set and 0 JARs found in /deployments (1 expected)
+INFO exec -a "java" java -XX:MaxRAMPercentage=80.0 -XX:+UseParallelGC -XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=20 -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -XX:+ExitOnOutOfMemoryError -cp "." -jar
+INFO running in /deployments
+Error: -jar requires jar file specification
+Usage: java [options] <mainclass> [args...]
+(to execute a class)
+or java [options] -jar <jarfile> [args...]
+(to execute a jar file)
+or java [options] -m <module>[/<mainclass>] [args...]
+java [options] --module <module>[/<mainclass>] [args...]
+(to execute the main class in a module)
+or java [options] <sourcefile> [args]
+(to execute a single source-file program)
+Arguments following the main class, source file, -jar <jarfile>,
+-m or --module <module>/<mainclass> are passed as the arguments to
+main class.
+
+
+
+-disableassertions[:<packagename>...|:<classname>]
+disable assertions with specified granularity
+-esa | -enablesystemassertions
+enable system assertions
+-dsa | -disablesystemassertions
+disable system assertions
+-agentlib:<libname>[=<options>]
+load native agent library <libname>, e.g. -agentlib:jdwp
+see also -agentlib:jdwp=help
+-agentpath:<pathname>[=<options>]
+load native agent library by full pathname
+-javaagent:<jarpath>[=<options>]
+load Java programming language agent, see java.lang.instrument
+-splash:<imagepath>
+show splash screen with specified image
+HiDPI scaled images are automatically supported and used
+if available. The unscaled image filename, e.g. image.ext,
+should always be passed as the argument to the -splash option.
+The most appropriate scaled image provided will be picked up
+automatically.
+See the SplashScreen API documentation for more information
+@argument files
+one or more argument files containing options
+-disable-@files
+prevent further argument file expansion
+--enable-preview
+allow classes to depend on preview features of this release
+To specify an argument for a long option, you can use --<name>=<value> or
+--<name> <value>.
+
+
+
+
+Jul 12, 2024 6:19:42 AM hudson.remoting.Engine startEngine
+WARNING: No Working Directory. Using the legacy JAR Cache location: /home/jenkins/.jenkins/cache/jars
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Locating server among [http://172.30.236.20:80/]
+Jul 12, 2024 6:19:42 AM org.jenkinsci.remoting.engine.JnlpAgentEndpointResolver resolve
+INFO: Remoting server accepts the following protocols: [JNLP4-connect, Ping]
+Jul 12, 2024 6:19:42 AM org.jenkinsci.remoting.engine.JnlpAgentEndpointResolver resolve
+INFO: Remoting TCP connection tunneling is enabled. Skipping the TCP Agent Listener Port availability check
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Agent discovery successful
+Agent address: 172.30.15.255
+Agent port: 50000
+Identity: 82:4f:23:24:98:51:29:71:8a:78:15:53:af:77:f2:b1
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Handshaking
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Connecting to 172.30.15.255:50000
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Trying protocol: JNLP4-connect
+Jul 12, 2024 6:19:42 AM org.jenkinsci.remoting.protocol.impl.BIONetworkLayer$Reader run
+INFO: Waiting for ProtocolStack to start.
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Remote identity confirmed: 82:4f:23:24:98:51:29:71:8a:78:15:53:af:77:f2:b1
+Jul 12, 2024 6:19:42 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Connected
+Jul 12, 2024 6:19:53 AM org.csanchez.jenkins.plugins.kubernetes.KubernetesSlave$SlaveDisconnector call
+INFO: Disabled agent engine reconnects.
+Jul 12, 2024 6:19:53 AM hudson.remoting.jnlp.Main$CuiListener status
+INFO: Terminated
+2024/07/12 06:19:53 [go-init] Main command exited
+2024/07/12 06:19:53 [go-init] No post-stop command defined, skip

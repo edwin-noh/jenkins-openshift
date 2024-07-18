@@ -1,0 +1,509 @@
+// CI Pipeline
+import groovy.transform.Field
+import groovy.json.JsonSlurper 
+
+@Field def CLUSTER = "aws-vrfy"
+@Field def PROJECT = "pty-dev"
+@Field def SRC_REPO_NAME = "fo-prototype-ui"
+@Field def GO_REPO_NAME = "fo-prototype-ui-go"
+@Field def IMAGE_NAME = "fo-prototype-ui"
+@Field def ARGO_APP_NAME = "pty-fo-ui-dev"
+@Field def METADATA_NAME = "pty-fo-ui-dev"
+@Field def BITBUCKET_URL = "https://bitbucket.org/kyobobook"
+@Field def ECR_URL = "870390927833.dkr.ecr.ap-northeast-2.amazonaws.com"
+@Field def ARGOCD_SERVER = "gitops.aws.vrfy.kyobobook.co.kr"
+@Field def IR_EXTERNAL_URL = "default-route-openshift-image-registry.apps.aws-vrfy.u80q.p1.openshiftapps.com"
+@Field def JENKINS_URL = "jenkins.aws.vrfy.kyobobook.co.kr"
+def SONAR_PROJECT_KEY = "fo-prototype-ui"
+
+@Field def JIRA_URL = "https://kyobobook.atlassian.net"
+
+def SRC_REPO_BRANCH = "development"
+@Field def GO_REPO_BRANCH = "development"
+@Field def GO_REPO_PATH = "overlay/dev"
+@Field def GIT_COMMIT = ""
+@Field def JIRA_ISSUE_KEY = ""
+
+def NEXUS_URL="http://nexus.kyobobook.co.kr:8081/repository/maven-public/"
+
+def SONAR_ENCODING       = "UTF-8"
+def SONAR_INCLUSIONS     = "**/*.java"
+def SONAR_SOURCES        = "./src"
+def SONAR_JAVA_BINARIES  = "./build"
+def SONAE_JAVA_LIBRARIES = "./build/libs/*.jar"
+def SONAR_FINDBUGS_EXCLUDED_FILTERS = "/config/spotbugs/spotbugs-exclude.xml"
+
+@Field def ECR_SECRET_NAME = "ecr-registry-push-pull"
+@Field def IR_INTERNAL_URL = "image-registry.openshift-image-registry.svc:5000"
+
+@Field def NEW_VERSION=""
+@Field def OLD_VERSION=""
+
+pipeline {
+    agent {
+        kubernetes {
+        cloud 'openshift'
+        defaultContainer 'slave'
+        yaml '''
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    some-label: some-label-value
+spec:
+  serviceAccountName: jenkins-slave
+  containers:
+  - name: slave
+    image: image-registry.openshift-image-registry.svc:5000/jenkins/jenkins-slave:2021-10-20.1
+    tty: true
+'''
+        }
+    }
+    environment {        
+        SCANNER_HOME = tool 'SonarScanner 4.6.2.2472'
+        JIRA_ACCESS  = credentials('jira-credentials')
+        GIT_ACCESS   = credentials('bitbucket-credentials')
+        ARGO_ACCESS  = credentials('argocd-credentials')
+        ECR_ACCESS   = credentials('ecr-token')
+    }
+    stages {
+        stage('Preset') {
+            steps {
+                script {
+                    try {
+                        def now = new Date()
+                        CREATED = now.format("yyyy-MM-dd:HH.mm.ss", TimeZone.getTimeZone('KST')).replace(':', 'T')
+                        NEW_VERSION="${CREATED}"
+                        env.preambleResult = true
+                    }
+                    catch(Exception e) {
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Git Clone') {
+            when {
+                expression {
+                    return env.preambleResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {            
+                script {
+                    try {
+                        git branch: "${SRC_REPO_BRANCH}", url: "https://bitbucket.org/kyobobook/${SRC_REPO_NAME}.git", credentialsId: "bitbucket-credentials"
+
+                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        
+                        def commitMessage = executeCmdReturn('git log -1 --pretty=%B ${git_commit}').split(' ')
+                        JIRA_ISSUE_KEY = commitMessage[0]
+
+                        addComment("빌드가 시작되었습니다.")
+                        
+
+                        env.gitCloneResult = true
+                    }
+                    catch(Exception e) {
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Build Source') {
+            when {
+                expression {
+                    return env.gitCloneResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {
+                script {
+                    try {
+                        // Build Source
+                        //sh "gradle build -x test --stacktrace"
+                        sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
+                        
+                        env.buildSourceResult = true
+                    }
+                    catch(Exception e) {
+                    	addComment("Build Source 스테이지에서 실패했습니다.")
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+
+        }
+        stage('SonarQube Analysis') {
+            when {
+                expression {
+                    return env.buildSourceResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {
+                script {
+                    try {
+                        /*
+                        def fileName = "${WORKSPACE}${SONAR_FINDBUGS_EXCLUDED_FILTERS}"
+                        def exists = fileExists "${fileName}"
+                        if(!exists){
+                            throw new Exception("File not Exists : ${fileName}")
+                        }
+                        */
+                        withSonarQubeEnv('SonarQube 8.9') {
+                            sh "${SCANNER_HOME}/bin/sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.inclusions=${SONAR_INCLUSIONS} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.java.libraries=${SONAE_JAVA_LIBRARIES} -Dsonar.findbugs.excludesFilters=${WORKSPACE}${SONAR_FINDBUGS_EXCLUDED_FILTERS} -Dsonar.sourceEncoding=${SONAR_ENCODING}"
+                        }
+                        
+                        timeout(time: 10, unit: 'MINUTES') {
+                            waitForQualityGate abortPipeline: true
+                        }
+                        
+                        env.sonarqubeResult = true
+                    }
+                    catch(Exception e) {
+                    	addComment("SonarQube Analysis 스테이지에서 실패했습니다.")
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Update BuildConfig') {
+            when {
+                expression {
+                    return env.sonarqubeResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            } 
+            steps {
+                script {
+                    try {
+
+                        openshift.withCluster("${CLUSTER}") {
+                            openshift.withProject("${PROJECT}") {
+                                try {
+                                    print(openshift.raw("get is ${IMAGE_NAME}").actions[0].out)
+                                }
+                                catch(Exception e) {
+                                    openshift.create("is", "${IMAGE_NAME}")
+                                }
+                                
+                                print('================= Update BuildConfig =================')
+                                try {
+                                    print(openshift.raw("get bc ${METADATA_NAME}").actions[0].out)
+                                    print("Already have bc/${METADATA_NAME}!")
+                                    print('--- Update BuildConfig ---')
+                                    def buildConfig = openshift.selector("bc", "${METADATA_NAME}").object()
+                                    buildConfig.spec.output.to.name = "${IMAGE_NAME}:${NEW_VERSION}" 
+                                    echo "${buildConfig}"
+            
+                                    openshift.apply(buildConfig)
+                                }
+                                catch(Exception e) {
+                                    print("There is no bc/${METADATA_NAME}!")
+                                    print('--- Create Yaml File ---')
+                                    createBuildConfigYaml()
+                                    print('--- Create BuildConfig ---')
+                                    openshift.create(readFile('buildConfig.yaml'))
+                                }
+                            }
+                        }
+                        
+                        env.updateBuildConfigResult = true
+                    }
+                    catch(Exception e) {
+                    	addComment("Update BuildConfig 스테이지에서 실패했습니다.")
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Build Image') {
+            when {
+                expression {
+                    return env.updateBuildConfigResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {
+                script {
+                    try {
+                        openshift.withCluster("${CLUSTER}") {
+                            openshift.withProject( "${PROJECT}" ) {
+                                print('================= Build Image =================')
+                                def build = openshift.startBuild(
+                                    "${METADATA_NAME}", 
+                                    "--from-dir=${WORKSPACE}/build/libs", 
+                                    "--follow",
+                                    "--wait"
+                                )
+                            }
+                        }
+                        // Copy Image to ECR
+                        withAWS(credentials:"ecr-credentials") {
+                            sh """
+                                skopeo copy \
+                                docker://${IR_EXTERNAL_URL}/${PROJECT}/${IMAGE_NAME}:${NEW_VERSION} \
+                                docker://${ECR_URL}/${PROJECT}/${IMAGE_NAME}:${NEW_VERSION} \
+                                --src-creds openshift:\$(oc whoami -t) \
+                                --dest-creds=$ECR_ACCESS_USR:$ECR_ACCESS_PSW \
+                                --src-tls-verify=false
+                            """
+                            
+                        }
+                        env.buildImageResult = true
+                    }
+                    catch(Exception e) {
+                    	addComment("Build Image 스테이지에서 실패했습니다.")
+                        cleanWs()
+                        PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                    finally {
+                        cleanWs()
+                    }
+                }
+            }
+        }
+        stage('Git Ops') {
+            when {
+                expression {
+                    return env.buildImageResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {
+                script {
+                    try {
+                        print("===== start ==== ")
+                        openshift.withCluster("${CLUSTER}") {
+                            openshift.withProject("${PROJECT}") {
+                                def rolloutStr = openshift.raw("get rollout ${METADATA_NAME} -o json").actions[0].out
+                                
+                                def parser = new JsonSlurper()
+                                def rolloutJson = parser.parseText(rolloutStr)
+                                
+                                OLD_VERSION = rolloutJson.spec.template.metadata.labels.appVersion
+                            }
+                        } 
+                        
+
+                        print("OLD_VERSION : ${OLD_VERSION}")
+                        print("NEW_VERSION : ${NEW_VERSION}")
+
+                        print('=================== Git Ops ===============')
+
+                        // GitOps Repo
+                        git branch: "${GO_REPO_BRANCH}", url: "${BITBUCKET_URL}/${GO_REPO_NAME}.git", credentialsId: "bitbucket-credentials"
+
+                        
+                        // Update Version
+                        sh("sed -i 's!newTag: .*!newTag: ${NEW_VERSION}!g' ${GO_REPO_PATH}/kustomization.yaml")
+                        sh("sed -i '0,/\"value\":.*/s//\"value\": \"${NEW_VERSION}\"/' ${GO_REPO_PATH}/rollout-patch.json")
+
+                        sh("""
+                            git add ${GO_REPO_PATH}/*
+                            git config --global user.name "leeahyeong"
+                            git config --global user.email "aylee5@kyobobook.com"
+                            git commit -m 'image version : ${NEW_VERSION} from Jenkins' 
+                            git config --local credential.helper "!f() { echo username=\\$GIT_ACCESS_USR; echo password=\\$GIT_ACCESS_PSW; }; f" 
+                            git push origin ${GO_REPO_BRANCH}
+                        """)    
+                        
+                        // sleep(30)
+                        env.gitopsResult = true;
+
+                    }
+                    catch(Exception e) {
+                    	addComment("GitOps 스테이지에서 실패했습니다.")
+                        PrintErrorMessage("Git Ops Stage Failed !")
+                        PrintErrorMessage(e)
+                        
+                        cleanWs()
+                        currentBuild.result = 'FAILURE'
+                    }
+                    finally {
+                        cleanWs()
+                    }
+                    
+                }
+            }
+        }
+        stage('Deploy') {
+            when {
+                expression {
+                    return env.gitopsResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
+                }
+            }
+            steps {
+                script {
+                    try {
+
+                        print("============== Deploy =============")
+                        argocdAppSync()
+                        argoRolloutPromote()
+
+                        print("================= Update DestinationRule ================")
+                        updateDestinationRule("${NEW_VERSION}", "${NEW_VERSION}")
+
+                        addComment("배포가 완료되었습니다.")
+                    } 
+                    catch(Exception e) {
+                    	addComment("Deploy 스테이지에서 실패했습니다.")
+                        PrintErrorMessage(e)
+
+                        print("============== Rollback =============")                   
+                        if (!rollback()) {
+                            currentBuild.result = 'FAILURE'
+                            return
+                        }
+
+                        cleanWs()
+                    }
+                }
+            }
+        }
+    }
+}
+def createBuildConfigYaml() {
+    sh """
+cat << EOF > buildConfig.yaml
+kind: BuildConfig
+apiVersion: build.openshift.io/v1
+metadata:
+  name: ${METADATA_NAME}
+spec:
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: ${IMAGE_NAME}:${NEW_VERSION}
+      namespace: ${PROJECT}
+  strategy:
+    type: Source
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        namespace: openshift
+        name: openjdk-11-rhel8:1.0
+  source:
+    type: Binary
+    binary: {}
+
+
+
+EOF
+"""
+}
+
+def rollbackGit() {
+    git branch: "${GO_REPO_BRANCH}", url: "${BITBUCKET_URL}/${GO_REPO_NAME}.git", credentialsId: "bitbucket-credentials"
+
+    sh("""
+        git reset --hard HEAD~1
+        git config --local credential.helper "!f() { echo username=\\$GIT_ACCESS_USR; echo password=\\$GIT_ACCESS_PSW; }; f"
+        git push -f origin ${GO_REPO_BRANCH}
+    """)
+}
+
+def argocdAppSync() {
+    sh("argocd login ${ARGOCD_SERVER} --username=${ARGO_ACCESS_USR} --password=${ARGO_ACCESS_PSW} --insecure")
+    sh("argocd app get ${ARGO_APP_NAME} --refresh --insecure")
+    sh("argocd app wait ${ARGO_APP_NAME} --timeout 300 --sync --insecure")
+    sh("argocd app wait ${ARGO_APP_NAME} --timeout 300 --suspended --health --insecure")
+}
+
+def argoRolloutPromote() {
+    openshift.withCluster("${CLUSTER}") {
+        openshift.withProject("${PROJECT}") {
+            sh("kubectl-argo-rollouts promote ${METADATA_NAME} -n ${PROJECT}")
+
+            timeout(time: 300, unit: 'SECONDS') {
+                sh("kubectl-argo-rollouts status ${METADATA_NAME} -n ${PROJECT}")
+            }
+            def status = executeCmdReturn("kubectl-argo-rollouts status ${METADATA_NAME} -n ${PROJECT}")
+            if (status != "Healthy") {
+                throw new Exception("${METADATA_NAME} STATUS : ${status}")
+            }
+        }
+    } 
+    
+}
+
+def rollback() {
+    try {
+        print("============== Rollback GitOps =============")
+        rollbackGit()
+
+        print("============== Rollback Sync =============")
+        argocdAppSync()
+
+        print("============== Rollback Trafic ==============")
+        updateDestinationRule("${OLD_VERSION}", "${OLD_VERSION}")
+
+        print("============== Rollback Promote =============")
+        argoRolloutPromote()
+
+        return true
+
+    }
+    catch (Exception e) {
+        PrintErrorMessage(e)
+        return false
+    }
+}
+
+
+def updateDestinationRule(stable, canary) {
+    sh """
+cat << EOF > destinationrule.yaml
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: ${METADATA_NAME}
+spec:
+  host: "${METADATA_NAME}"
+  subsets:
+  - name: Stable
+    labels:
+      appVersion: ${stable}
+  - name: Canary
+    labels:
+      appVersion: ${canary}
+
+
+
+
+EOF
+"""
+    openshift.withCluster("${CLUSTER}") {
+        openshift.withProject("${PROJECT}") {
+            openshift.raw("apply -f destinationrule.yaml")
+        }
+    }
+    
+}
+
+
+def addComment(message) {
+    sh """ curl \
+    -D- -q \
+    -u ${JIRA_ACCESS_USR}:${JIRA_ACCESS_PSW} \
+    -X POST \
+    --data \"{\\"body\\":\\"${message}\\n\\n- 젠킨스 빌드 넘버 : ${BUILD_NUMBER}\\n- 소스 커밋 아이디 : ${GIT_COMMIT}\\n- 젠킨스 콘솔 로그 : https:\\/\\/${JENKINS_URL}\\/job\\/${JOB_NAME}\\/${BUILD_NUMBER}\\/console\\"}\" \
+    -H "Content-Type: application/json" \
+    ${JIRA_URL}/rest/api/2/issue/${JIRA_ISSUE_KEY}/comment
+    """
+}
+
+def executeCmdReturn(cmd){
+  return sh(returnStdout: true, script: cmd).trim()
+}
+def PrintErrorMessage(e) {
+    print("[ERROR INTERRUPTED] >>>>>>>>>>> " + e)
+}
