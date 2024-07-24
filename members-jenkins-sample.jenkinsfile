@@ -1,10 +1,15 @@
+STRING CLUSTER = "openshift"
+PROJECT = "jenkins"
+
 String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
 String SONAR_PROJECT_KEY = "members"
 String SONAR_TOKEN = "squ_787d552946802ab60eb36acf8e13eddff20feb41"
 String SONAR_SOURCES = "src/main"
 String SONAR_TESTS = "src/test"
 String SONAR_EXCLUSIONS = "**/main/resources/db/**"
-String SONAR_JAVA_BINARIES = "target/classes"
+String SONAR_JAVA_BINARIES = "./build/"
+
+String IMAGE_NAME = "springboot-sample:1.0"
 
 pipeline {
     agent {
@@ -77,15 +82,84 @@ pipeline {
             }
 
         }
-        stage('Code Analysis') {
-            environment {
-                SONAR_USER_HOME = './'
-            }
+        // stage('Code Analysis') {
+        //     environment {
+        //         SONAR_USER_HOME = './'
+        //     }
+        //     steps {
+        //         container('sonar-cli') {
+        //             script {
+        //                 try {
+        //                     sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
+        //                     env.buildSourceResult = true
+        //                 }
+        //                 catch(Exception e) {
+        //                     // addComment("Build Source 스테이지에서 실패했습니다.")
+        //                     // cleanWs()
+        //                     // PrintErrorMessage(e)
+        //                     currentBuild.result = 'FAILURE'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        stage('Build Image') {
             steps {
-                container('sonar-cli') {
+                container('buildah') {
                     script {
                         try {
-                            sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
+                            // Build Source
+                            //sh "gradle build -x test --stacktrace"
+                            // sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
+                            sh '''
+                            cat << EOF > Dockerfile
+                            FROM registry.redhat.io/ubi8/openjdk-17:latest
+                            ARG JAR_FILE=target/*.jar
+                            COPY ${JAR_FILE} /deployments/app.jar
+                            ENTRYPOINT ["java","-jar","/deployments/app.jar"]
+                            '''
+
+                            sh "ls -al"
+                            sh "cat Dockerfile"
+                            sh "ls -al ./build/"
+
+                            sh """
+                            cat << EOF > buildConfig.yaml
+                            kind: BuildConfig
+                            apiVersion: build.openshift.io/v1
+                            metadata:
+                            name: ${METADATA_NAME}
+                            spec:
+                            successfulBuildsHistoryLimit: 5
+                            failedBuildsHistoryLimit: 5
+                            output:
+                                to:
+                                kind: ImageStreamTag
+                                name: ${IMAGE_NAME}:${NEW_VERSION}
+                                namespace: ${PROJECT}
+                            strategy:
+                                type: Source
+                                sourceStrategy:
+                                from:
+                                    kind: ImageStreamTag
+                                    namespace: openshift
+                                    name: openjdk-11-rhel8:1.0
+                            source:
+                                type: Binary
+                                binary: {}
+
+
+
+                            EOF
+"""
+
+                            // Build with Build Config
+                            openshift.withCluster("${CLUSTER}") {
+                                openshift.withProject("${PROJECT}") {
+
+                                }
+                            }
+                            
                             env.buildSourceResult = true
                         }
                         catch(Exception e) {
@@ -95,8 +169,9 @@ pipeline {
                             currentBuild.result = 'FAILURE'
                         }
                     }
-                }
+                }                
             }
-        }  
+
+        }
     }
 }
