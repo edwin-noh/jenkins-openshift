@@ -1,5 +1,5 @@
-STRING CLUSTER = "openshift"
-PROJECT = "jenkins"
+String CLUSTER = "openshift"
+String PROJECT = "jenkins"
 
 String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
 String SONAR_PROJECT_KEY = "members"
@@ -9,7 +9,9 @@ String SONAR_TESTS = "src/test"
 String SONAR_EXCLUSIONS = "**/main/resources/db/**"
 String SONAR_JAVA_BINARIES = "./build/"
 
-String IMAGE_NAME = "springboot-sample:1.0"
+String IMAGE_NAME = "springboot-sample"
+String NEW_VERSION = "1.0"
+String BC_NAME = "test"
 
 pipeline {
     agent {
@@ -18,6 +20,39 @@ pipeline {
         }
     }
     stages {
+        stage('Create Image') {
+            steps {
+                container('buildah') {
+                    script {
+                        try {
+                            // Build with docker
+                            // Build Source
+                            
+                            sh '''
+                            cat << EOF > Dockerfile
+                            FROM quay.apps.ocp4-hub.edwin.home/members/openjdk-17:1.20
+                            ARG JAR_FILE=./README.md
+                            COPY ${JAR_FILE} /deployments/app.jar
+                            ENTRYPOINT ["java","-jar","/deployments/app.jar"]
+                            '''
+                            sh "ls -al"
+                            sh "cat Dockerfile"
+                            sh "buildah bud --format=oci --tls-verify=false -t test:1.0 -f ./Dockerfile ."
+
+                            // sh '''
+                            // buildah login -u ${DOCKERHUB_CREDENTIALS_USR} -p ${DOCKERHUB_CREDENTIALS_PSW} docker.io
+                            // buildah push your-docker-image-name:${env.BUILD_ID} docker://docker.io/your-docker-image-name:${env.BUILD_ID}
+                            // buildah push your-docker-image-name:${env.BUILD_ID} docker://docker.io/your-docker-image-name:latest
+                            // '''
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }              
+            }
+        }
         stage('checkout') {
             // when {
             //     expression {
@@ -105,61 +140,54 @@ pipeline {
         // }
         stage('Build Image') {
             steps {
-                container('buildah') {
+                container('docker') {
                     script {
                         try {
-                            // Build Source
-                            //sh "gradle build -x test --stacktrace"
-                            // sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
-                            sh '''
-                            cat << EOF > Dockerfile
-                            FROM registry.redhat.io/ubi8/openjdk-17:latest
-                            ARG JAR_FILE=target/*.jar
-                            COPY ${JAR_FILE} /deployments/app.jar
-                            ENTRYPOINT ["java","-jar","/deployments/app.jar"]
-                            '''
-
-                            sh "ls -al"
-                            sh "cat Dockerfile"
-                            sh "ls -al ./build/"
-
-                            sh """
-                            cat << EOF > buildConfig.yaml
-                            kind: BuildConfig
-                            apiVersion: build.openshift.io/v1
-                            metadata:
-                            name: ${METADATA_NAME}
-                            spec:
-                            successfulBuildsHistoryLimit: 5
-                            failedBuildsHistoryLimit: 5
-                            output:
-                                to:
-                                kind: ImageStreamTag
-                                name: ${IMAGE_NAME}:${NEW_VERSION}
-                                namespace: ${PROJECT}
-                            strategy:
-                                type: Source
-                                sourceStrategy:
-                                from:
-                                    kind: ImageStreamTag
-                                    namespace: openshift
-                                    name: openjdk-11-rhel8:1.0
-                            source:
-                                type: Binary
-                                binary: {}
-
-
-
-                            EOF
-"""
-
-                            // Build with Build Config
-                            openshift.withCluster("${CLUSTER}") {
-                                openshift.withProject("${PROJECT}") {
-
-                                }
-                            }
                             
+                            
+
+                            //https://github.com/jenkinsci/openshift-client-plugin?tab=readme-ov-file#creating-objects-easier-than-you-were-expecting-hopefully
+                            // def buildConfig = ["kind": "BuildConfig", "metadata": ["name": "${BC_NAME}"]]
+
+                            // sh """
+                            // cat << EOF > buildConfig.yaml
+                            // kind: BuildConfig
+                            // apiVersion: build.openshift.io/v1
+                            // metadata:
+                            // name: ${BC_NAME}
+                            // spec:
+                            // successfulBuildsHistoryLimit: 5
+                            // failedBuildsHistoryLimit: 5
+                            // output:
+                            //     to:
+                            //     kind: ImageStreamTag
+                            //     name: ${IMAGE_NAME}:${NEW_VERSION}
+                            //     namespace: ${PROJECT}
+                            // strategy:
+                            //     type: Source
+                            //     sourceStrategy:
+                            //     from:
+                            //         kind: ImageStreamTag
+                            //         namespace: openshift
+                            //         name: openjdk-11-rhel8:1.0
+                            // source:
+                            //     type: Binary
+                            //     binary: {}
+                            // EOF
+                            // """
+                            // Build with Build Config
+                            // openshift.withCluster("${CLUSTER}") {
+                            //     openshift.withProject("${PROJECT}") {
+                            //         try {
+                            //             def bc = openshift.selector("bc", "${BC_NAME}").object()
+                            //         } catch(Exception ex) {
+
+                            //         }
+                                    
+                            //     }
+                            // }
+                            
+
                             env.buildSourceResult = true
                         }
                         catch(Exception e) {
@@ -169,7 +197,7 @@ pipeline {
                             currentBuild.result = 'FAILURE'
                         }
                     }
-                }                
+                }              
             }
 
         }

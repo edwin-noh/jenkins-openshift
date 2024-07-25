@@ -1,0 +1,105 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: pipeline-{{ .Values.name }}
+spec:
+  workspaces:
+    - name: workspace
+    - name: git-auth
+    - name: maven-settings-cm
+    - name: sonarqube-props
+  params:
+    - name: git-url
+      type: string
+      description: url of the git repo for the code of deployment
+    - name: git-revision
+      type: string
+      description: revision to be used from repo of the code for deployment
+      default: main    
+  tasks:
+    - name: git-clone
+      taskRef:
+        name: git-clone
+        kind: ClusterTask
+      workspaces:
+      - name: output
+        workspace: workspace
+      - name: basic-auth
+        workspace: git-auth
+      params:
+      - name: url
+        value: $(params.git-url)
+      - name: subdirectory
+        value: ""
+      - name: deleteExisting
+        value: "true"
+      - name: revision
+        value: $(params.git-revision)
+    - name: maven-build
+      params:
+        - name: MAVEN_IMAGE
+          value: >-
+            registry.access.redhat.com/ubi8/openjdk-17:1.19-4
+        - name: GOALS
+          value:
+            - clean
+            - package
+            - '-DskipTests=true'        
+      runAfter:
+        - git-clone
+      taskRef:
+        kind: ClusterTask
+        name: maven
+      workspaces:
+        - name: source
+          workspace: shared-workspace-pvc
+        - name: maven-settings
+          workspace: maven-settings-cm
+    - name: sonarqube-scanner
+      taskRef:
+        name: sonarqube-scanner        
+      params:
+        # - name: SONAR_HOST_URL
+        #   value: http://sonarqube-sonarqube.apps.ocp4-hub.edwin.home/
+        # - name: SONAR_PROJECT_KEY
+        #   value: sample-app
+      workspaces:
+        - name: source
+          workspace: shared-workspace-pvc
+        - name: sonar-settings
+          workspace: sonarqube-props
+      runAfter:
+        - maven-build
+    # - name: image-build
+    #   taskRef:
+    #     name: buildah
+    #     kind: ClusterTask
+    #   params:
+    #   - name: IMAGE
+    #     value: $(params.appImage)
+    #   - name: DOCKERFILE
+    #     value: src/main/docker/Dockerfile.jvm
+    #   workspaces:
+    #   - name: source
+    #     workspace: source-code
+    #   runAfter:
+    #   - maven-build
+    # - name: update-image-tag
+    #   taskRef:
+    #     name: update-gitops-repo
+    #   workspaces:
+    #   - name: source
+    #     workspace: shared-workspace-pvc
+    #   - name: basic-auth
+    #     workspace: git-secret
+    #   params:
+    #   - name: GIT_URL
+    #     value: https://gitlab.consulting.redhat.com/edwin-projects/app-config-sample.git
+    #   - name: PATH
+    #     value: apps/petclinic-sample/overlays
+    #   - name: TAG
+    #     value: "77"
+    #   runAfter:
+    #     - maven-build
+
+    
