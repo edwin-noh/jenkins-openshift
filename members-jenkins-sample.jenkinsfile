@@ -12,7 +12,10 @@ String SONAR_JAVA_BINARIES = "./build/"
 String IMAGE_NAME = "springboot-sample"
 String NEW_VERSION = "1.0"
 String BC_NAME = "test"
+<<<<<<< HEAD
 String IMAGE_TAG = "1.0"
+=======
+>>>>>>> 03974d2 (update)
 
 pipeline {
     agent {
@@ -180,12 +183,17 @@ pipeline {
                             //             def bc = openshift.selector("bc", "${BC_NAME}").object()
                             //         } catch(Exception ex) {
 
+<<<<<<< HEAD
                             //         }
                                     
                             //     }
                             // }
                             
 
+=======
+                                }
+                            }
+>>>>>>> 03974d2 (update)
                             env.buildSourceResult = true
                         }
                         catch(Exception e) {
