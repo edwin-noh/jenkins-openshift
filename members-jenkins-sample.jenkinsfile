@@ -10,8 +10,12 @@ String SONAR_EXCLUSIONS = "**/main/resources/db/**"
 String SONAR_JAVA_BINARIES = "./build/"
 
 String IMAGE_NAME = "springboot-sample"
+<<<<<<< HEAD
 String NEW_VERSION = "1.0"
 String BC_NAME = "test"
+=======
+String IMAGE_TAG = "1.0"
+>>>>>>> 783dbae (update)
 
 pipeline {
     agent {
@@ -143,6 +147,57 @@ pipeline {
                 container('docker') {
                     script {
                         try {
+<<<<<<< HEAD
+=======
+                            // Build Source
+                            //sh "gradle build -x test --stacktrace"
+                            // sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
+                            sh '''
+                            cat << EOF > Dockerfile
+                            FROM registry.redhat.io/ubi8/openjdk-17:latest
+                            ARG JAR_FILE=target/*.jar
+                            COPY ${JAR_FILE} /deployments/app.jar
+                            ENTRYPOINT ["java","-jar","/deployments/app.jar"]
+                            '''
+
+                            sh "ls -al"
+                            sh "cat Dockerfile"
+                            sh "ls -al ./build/"
+
+                            sh """
+                            cat << EOF > buildConfig.yaml
+                            kind: BuildConfig
+                            apiVersion: build.openshift.io/v1
+                            metadata:
+                            name: BC-Test
+                            spec:
+                            successfulBuildsHistoryLimit: 5
+                            failedBuildsHistoryLimit: 5
+                            output:
+                                to:
+                                kind: ImageStreamTag
+                                name: ${IMAGE_NAME}:${IMAGE_TAG}
+                                namespace: ${PROJECT}
+                            strategy:
+                                type: Source
+                                sourceStrategy:
+                                from:
+                                    kind: ImageStreamTag
+                                    namespace: openshift
+                                    name: openjdk-11-rhel8:1.0
+                            source:
+                                type: Binary
+                                binary: {}
+                            EOF
+                            """
+
+                            // Build with Build Config
+                            openshift.withCluster("${CLUSTER}") {
+                                openshift.withProject("${PROJECT}") {
+
+                                }
+                            }
+>>>>>>> 783dbae (update)
                             
                             
 
