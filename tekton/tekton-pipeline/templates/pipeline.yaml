@@ -9,13 +9,13 @@ spec:
     - name: maven-settings-cm
     - name: sonarqube-props
   params:
-    - name: git-url
+    - name: gitHttpUrl
       type: string
-      description: url of the git repo for the code of deployment
-    - name: git-revision
+      description: http url of the git repo for the code of deployment
+    - name: gitBranch
       type: string
-      description: revision to be used from repo of the code for deployment
-      default: main    
+      description: branch to be used from repo of the code for deployment
+      default: main
   tasks:
     - name: git-clone
       taskRef:

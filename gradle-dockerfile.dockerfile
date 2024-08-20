@@ -20,3 +20,6 @@ ENV PATH="${PATH}:${GRADLE_HOME}/bin"
 # USER 1001
 
 RUN gradle --version -g ~/.gradle
+
+
+quay.apps.ocp4-hub.edwin.home/members/gradle-jenkins:1.0

@@ -1,4 +1,4 @@
-FROM registry.redhat.io/ubi8/openjdk-17:1.20
+FROM sonarsource/sonar-scanner-cli:10
 
 USER root
 

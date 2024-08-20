@@ -15,31 +15,57 @@ String BC_NAME = "test"
 
 pipeline {
     agent {
-        node {
-            label 'gradle' 
+        kubernetes {
+        cloud 'openshift'
+        defaultContainer 'jnlp'
+        yaml '''\
+            apiVersion: v1
+            kind: Pod
+            metadata:
+            labels:
+                jenkins: slave
+                jenkins/label: members
+            spec:
+                serviceAccountName: jenkins
+                containers:
+                - name: jnlp
+                  image: registry.redhat.io/ocp-tools-4/jenkins-agent-base-rhel8:v4.13.0-1686680363
+                  tty: false
+                  imagePullPolicy: Always
+                  args:
+                    - $(JENKINS_SECRET)
+                    - $(JENKINS_NAME)
+                  env:
+                    - name: CONTAINER_HEAP_PERCENT
+                      value: 0.5                    
+                - name: builder
+                  image: quay.apps.ocp4-hub.edwin.home/members/jenkins-builder:1.0
+                  tty: true
+                  command:
+                    - sleep
+                  args:
+                    - 99d
+                  securityContext:
+                    privileged: true   
+                - name: buildah
+                  image: registry.redhat.io/rhel8/buildah@sha256:73d263d124f4b7ce2796c9353094e9808ff905a74cfdd2507ac9924bfe468cec
+                  tty: true
+                  command:
+                    - sleep
+                  args:
+                    - 99d
+                  securityContext:
+                    privileged: true                
+            '''.stripIndent()
         }
     }
     stages {
         stage('checkout') {
-            // when {
-            //     expression {
-            //         return env.preambleResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
-            //     }
-            // }
             steps {            
                 script {
                     try {
-                        //git branch: "${SRC_REPO_BRANCH}", url: "https://bitbucket.org/kyobobook/${SRC_REPO_NAME}.git", credentialsId: "bitbucket-credentials"
                         git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
-
                         GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
-                        
-                        // def commitMessage = executeCmdReturn('git log -1 --pretty=%B ${git_commit}').split(' ')
-                        //JIRA_ISSUE_KEY = commitMessage[0]
-
-                        //addComment("빌드가 시작되었습니다.")
-                        
-
                         env.gitCloneResult = true
                     }
                     catch(Exception e) {
@@ -51,25 +77,18 @@ pipeline {
             }
         }
         stage('Build Source') {
-            // when {
-            //     expression {
-            //         return env.gitCloneResult ==~ /(?i)(Y|YES|T|TRUE|ON|RUN)/
-            //     }
-            // }
             steps {
-                container('gradle') {
+                container('builder') {
                     script {
                         try {
                             // Build Source
-                            //sh "gradle build -x test --stacktrace"
-                            // sh "gradle build -PnexusURL='${NEXUS_URL}' -x test --stacktrace"
-                            sh "ls -al"
-                            sh 'echo ${GRADLE_HOME}'
-                            sh 'ls -al /opt/gradle'
-                            sh "pwd"
-                            // sh "gradle --version"
-                            // sh 'which gradle'
-                            sh 'id'
+                            // sh "ls -al"
+                            // sh 'echo ${GRADLE_HOME}'
+                            // sh 'ls -al /opt/gradle'
+                            // sh "pwd"
+                            // // sh "gradle --version"
+                            // // sh 'which gradle'
+                            // sh 'id'
                             sh "gradle build -x test --stacktrace -g .gradle -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false"
                             env.buildSourceResult = true
                         }
@@ -83,50 +102,48 @@ pipeline {
                 }                
             }
         }
-        // stage('Code Analysis') {
-        //     environment {
-        //         SONAR_USER_HOME = './'
-        //     }
-        //     steps {
-        //         container('sonar-cli') {
-        //             script {
-        //                 try {
-        //                     sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
-        //                     env.buildSourceResult = true
-        //                 }
-        //                 catch(Exception e) {
-        //                     // addComment("Build Source 스테이지에서 실패했습니다.")
-        //                     // cleanWs()
-        //                     // PrintErrorMessage(e)
-        //                     currentBuild.result = 'FAILURE'
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
+        stage('Code Analysis') {
+            environment {
+                SONAR_USER_HOME = './'
+            }
+            steps {
+                container('builder') {
+                    script {
+                        try {
+                            sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            // addComment("Build Source 스테이지에서 실패했습니다.")
+                            // cleanWs()
+                            // PrintErrorMessage(e)
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }
+            }
+        }
         stage('Create Image') {
             steps {
                 container('buildah') {
                     script {
                         try {
-                            // Build with docker
-                            // Build Source
+                            sh "ls -al"
+                            sh "ls -al build/libs/"
                             
-                            sh '''
+                            sh '''\
                             cat << EOF > Dockerfile
                             FROM quay.apps.ocp4-hub.edwin.home/members/openjdk-17:1.20
-                            ARG JAR_FILE=./README.md
-                            COPY ${JAR_FILE} /deployments/app.jar
+                            ARG JAR_FILE=build/libs/*.jar
+                            COPY '${JAR_FILE}' /deployments/app.jar
                             ENTRYPOINT ["java","-jar","/deployments/app.jar"]
-                            ic'''
-                            sh "ls -al"
+                            EOF
+                            '''.stripIndent()
+
                             sh "cat Dockerfile"
                             sh "buildah bud --format=oci --tls-verify=false -t test:1.0 -f ./Dockerfile ."
 
-                            sh '''
-                            // buildah login -u ${DOCKERHUB_CREDENTIALS_USR} -p ${DOCKERHUB_CREDENTIALS_PSW} docker.io
-                               buildah push --tls-verify=false --digestfile /tmp/image-digest test:1.0 docker://quay.apps.ocp4-hub.edwin.home/members/sample-app:1.0
-                            '''
+                            sh "buildah push --tls-verify=false --digestfile /tmp/image-digest test:1.0 docker://quay.apps.ocp4-hub.edwin.home/members/sample-app:1.0"
                             env.buildSourceResult = true
                         }
                         catch(Exception e) {
@@ -136,63 +153,5 @@ pipeline {
                 }              
             }
         }
-
-        // stage('Build Image') {
-        //     steps {
-        //         container('docker') {
-        //             script {
-        //                 try {
-        //                     //https://github.com/jenkinsci/openshift-client-plugin?tab=readme-ov-file#creating-objects-easier-than-you-were-expecting-hopefully
-        //                     // def buildConfig = ["kind": "BuildConfig", "metadata": ["name": "${BC_NAME}"]]
-
-        //                     // sh """
-        //                     // cat << EOF > buildConfig.yaml
-        //                     // kind: BuildConfig
-        //                     // apiVersion: build.openshift.io/v1
-        //                     // metadata:
-        //                     // name: ${BC_NAME}
-        //                     // spec:
-        //                     // successfulBuildsHistoryLimit: 5
-        //                     // failedBuildsHistoryLimit: 5
-        //                     // output:
-        //                     //     to:
-        //                     //     kind: ImageStreamTag
-        //                     //     name: ${IMAGE_NAME}:${NEW_VERSION}
-        //                     //     namespace: ${PROJECT}
-        //                     // strategy:
-        //                     //     type: Source
-        //                     //     sourceStrategy:
-        //                     //     from:
-        //                     //         kind: ImageStreamTag
-        //                     //         namespace: openshift
-        //                     //         name: openjdk-11-rhel8:1.0
-        //                     // source:
-        //                     //     type: Binary
-        //                     //     binary: {}
-        //                     // EOF
-        //                     // """
-        //                     // Build with Build Config
-        //                     // openshift.withCluster("${CLUSTER}") {
-        //                     //     openshift.withProject("${PROJECT}") {
-        //                     //         try {
-        //                     //             def bc = openshift.selector("bc", "${BC_NAME}").object()
-        //                     //         } catch(Exception ex) {
-        //                     //         }
-                                    
-        //                     //     }
-        //                     // }
-        //                     env.buildSourceResult = true
-        //                 }
-        //                 catch(Exception e) {
-        //                     // addComment("Build Source 스테이지에서 실패했습니다.")
-        //                     // cleanWs()
-        //                     // PrintErrorMessage(e)
-        //                     currentBuild.result = 'FAILURE'
-        //                 }
-        //             }
-        //         }              
-        //     }
-
-        // }
     }
 }

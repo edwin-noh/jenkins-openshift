@@ -55,3 +55,6 @@ spec:
   insecureRegistry: true
   
   quayHostname: https://quay-registry-quay-quay-enterprise.apps.ocp4-hub.edwin.home
+
+  # Jenkins multi-container 참고
+  https://cwal.tistory.com/25

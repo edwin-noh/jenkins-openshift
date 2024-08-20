@@ -1,0 +1,159 @@
+String CLUSTER = "openshift"
+String PROJECT = "jenkins"
+
+String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
+String SONAR_PROJECT_KEY = "members"
+String SONAR_TOKEN = "squ_787d552946802ab60eb36acf8e13eddff20feb41"
+String SONAR_SOURCES = "src/main"
+String SONAR_TESTS = "src/test"
+String SONAR_EXCLUSIONS = "**/main/resources/db/**"
+String SONAR_JAVA_BINARIES = "./build/"
+
+String IMAGE_NAME = "springboot-sample"
+String NEW_VERSION = "1.0"
+String BC_NAME = "test"
+
+pipeline {
+    agent {
+        kubernetes {
+        cloud 'openshift'
+        defaultContainer 'jnlp'
+        yaml '''\
+            apiVersion: v1
+            kind: Pod
+            metadata:
+            labels:
+                jenkins: slave
+                jenkins/label: members
+            spec:
+                serviceAccountName: jenkins
+                containers:
+                - name: jnlp
+                  image: registry.redhat.io/ocp-tools-4/jenkins-agent-base-rhel8:v4.13.0-1686680363
+                  tty: false
+                  imagePullPolicy: Always
+                  args:
+                    - $(JENKINS_SECRET)
+                    - $(JENKINS_NAME)
+                  env:
+                    - name: CONTAINER_HEAP_PERCENT
+                      value: 0.5                    
+                - name: gradle
+                  image: quay.apps.ocp4-hub.edwin.home/members/jenkins-builder
+                  tty: true
+                  command:
+                    - cat     
+                - name: sonar-cli
+                  image: quay.apps.ocp4-hub.edwin.home/members/jenkins-builder
+                  tty: true
+                  command:
+                    - sleep
+                  args:
+                    - 1000                  
+                - name: buildah
+                  image: registry.redhat.io/rhel8/buildah@sha256:73d263d124f4b7ce2796c9353094e9808ff905a74cfdd2507ac9924bfe468cec
+                  tty: true
+                  args:
+                    - 1000
+                  command:
+                    - sleep                                                  
+                  securityContext:
+                    privileged: true                
+            '''.stripIndent()
+        }
+    }
+    stages {
+        stage('checkout') {
+            steps {            
+                script {
+                    try {
+                        git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
+                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        env.gitCloneResult = true
+                    }
+                    catch(Exception e) {
+                        //cleanWs()
+                        //PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Build Source') {
+            steps {
+                container('gradle') {
+                    script {
+                        try {
+                            // Build Source
+                            // sh "ls -al"
+                            // sh 'echo ${GRADLE_HOME}'
+                            // sh 'ls -al /opt/gradle'
+                            // sh "pwd"
+                            // // sh "gradle --version"
+                            // // sh 'which gradle'
+                            // sh 'id'
+                            sh "gradle build -x test --stacktrace -g .gradle -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            // addComment("Build Source 스테이지에서 실패했습니다.")
+                            // cleanWs()
+                            // PrintErrorMessage(e)
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }                
+            }
+        }
+        stage('Code Analysis') {
+            environment {
+                SONAR_USER_HOME = './'
+            }
+            steps {
+                container('sonar-cli') {
+                    script {
+                        try {
+                            sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            // addComment("Build Source 스테이지에서 실패했습니다.")
+                            // cleanWs()
+                            // PrintErrorMessage(e)
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }
+            }
+        }
+        stage('Create Image') {
+            steps {
+                container('buildah') {
+                    script {
+                        try {
+                            sh "ls -al"
+                            
+                            sh '''\
+                            cat << EOF > Dockerfile
+                            FROM quay.apps.ocp4-hub.edwin.home/members/openjdk-17:1.20
+                            ARG JAR_FILE=build/libs/*.jar
+                            COPY ${JAR_FILE} /deployments/app.jar
+                            ENTRYPOINT ["java","-jar","/deployments/app.jar"]
+                            EOF
+                            '''.stripIndent()
+
+                            sh "cat Dockerfile"
+                            sh "buildah bud --format=oci --tls-verify=false -t test:1.0 -f ./Dockerfile ."
+
+                            sh "buildah push --tls-verify=false --digestfile /tmp/image-digest test:1.0 docker://quay.apps.ocp4-hub.edwin.home/members/sample-app:1.0"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }              
+            }
+        }
+    }
+}
