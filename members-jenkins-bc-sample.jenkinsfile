@@ -1,0 +1,263 @@
+import groovy.transform.Field
+
+String CLUSTER = "ocp4-hub"
+String PROJECT = "sample-app"
+
+String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
+String SONAR_PROJECT_KEY = "members"
+String SONAR_TOKEN = "squ_787d552946802ab60eb36acf8e13eddff20feb41"
+String SONAR_SOURCES = "src/main"
+String SONAR_TESTS = "src/test"
+String SONAR_EXCLUSIONS = "**/main/resources/db/**"
+String SONAR_JAVA_BINARIES = "./build/"
+
+@Field String APP_NAME = "springboot-petclinic-sample"
+// @Field String IMAGE_NAME = "springboot-petclinic-sample"
+// @Field String IMAGE_NAME = "quay.apps.ocp4-hub.edwin.home/members/sample-app"
+@Field String IMAGE_NAME = "springboot-petclinic-sample"
+@Field String IMAGE_VERSION = "1.0"
+// @Field String BASE_IMAGE = "java-runtime:openjdk-17-ubi8"
+@Field String BASE_IMAGE = "java:openjdk-17-ubi8"
+
+
+pipeline {
+    agent {
+        kubernetes {
+        cloud 'openshift'
+        defaultContainer 'jnlp'
+        yaml '''\
+            apiVersion: v1
+            kind: Pod
+            metadata:
+            labels:
+                jenkins: slave
+                jenkins/label: members
+            spec:
+                serviceAccountName: jenkins
+                containers:
+                - name: jnlp
+                  image: registry.redhat.io/ocp-tools-4/jenkins-agent-base-rhel8:v4.13.0-1686680363
+                  tty: false
+                  imagePullPolicy: Always
+                  args:
+                    - $(JENKINS_SECRET)
+                    - $(JENKINS_NAME)
+                  env:
+                    - name: CONTAINER_HEAP_PERCENT
+                      value: 0.5                    
+                - name: builder
+                  image: quay.apps.ocp4-hub.edwin.home/members/jenkins-builder:1.0
+                  tty: true
+                  command:
+                    - sleep
+                  args:
+                    - 99d                  
+            '''
+        }
+    }
+    stages {
+        stage('checkout') {
+            steps {            
+                script {
+                    try {
+                        git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
+                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        env.gitCloneResult = true
+                    }
+                    catch(Exception e) {
+                        //cleanWs()
+                        //PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
+            }
+        }
+        stage('Build Source') {
+            steps {
+                container('builder') {
+                    script {
+                        try {
+                            // Build Source
+                            // sh "ls -al"
+                            // sh 'echo ${GRADLE_HOME}'
+                            // sh 'ls -al /opt/gradle'
+                            // sh "pwd"
+                            // // sh "gradle --version"
+                            // // sh 'which gradle'
+                            // sh 'id'
+                            sh "gradle build -x test --stacktrace -g .gradle -Dorg.gradle.daemon=false -Dorg.gradle.parallel=false"
+                            env.buildSourceResult = true
+                        }
+                        catch(Exception e) {
+                            // addComment("Build Source 스테이지에서 실패했습니다.")
+                            // cleanWs()
+                            // PrintErrorMessage(e)
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
+                }                
+            }
+        }
+        // stage('Code Analysis') {
+        //     environment {
+        //         SONAR_USER_HOME = './'
+        //     }
+        //     steps {
+        //         container('builder') {
+        //             script {
+        //                 try {
+        //                     sh "sonar-scanner -Dsonar.host.url=${SONAR_HOST_URL} -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.login=${SONAR_TOKEN} -Dsonar.sources=${SONAR_SOURCES} -Dsonar.tests=${SONAR_TESTS} -Dsonar.exclusions=${SONAR_EXCLUSIONS} -Dsonar.java.binaries=${SONAR_JAVA_BINARIES} -Dsonar.working.directory=.sonar"
+        //                     env.buildSourceResult = true
+        //                 }
+        //                 catch(Exception e) {
+        //                     // addComment("Build Source 스테이지에서 실패했습니다.")
+        //                     // cleanWs()
+        //                     // PrintErrorMessage(e)
+        //                     currentBuild.result = 'FAILURE'
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        stage('Create Image') {
+            steps {                
+                script {
+                    try {
+                        openshift.withCluster() {
+                            openshift.withProject("${PROJECT}") {
+                                print('================= start build =================')
+                                // def isSelector = openshift.selector( "is", "${IMAGE_NAME}")
+                                // print(isSelector.exists())
+                                // if (!isSelector.exists()) {
+                                //     print('================= Create image stream =================')
+                                //     openshift.create("is", "${IMAGE_NAME}")
+                                // }
+                                // try {
+                                //     print(openshift.raw("get is ${IMAGE_NAME}").actions[0].out)
+                                // }
+                                // catch(Exception e) {
+                                //     openshift.create("is", "${IMAGE_NAME}")
+                                // }
+                                
+                                    
+                                def bcSelector = openshift.selector( "bc", "${APP_NAME}")
+                                print(bcSelector.exists())
+                                if (bcSelector.exists()) {
+                                    def buildConfig = openshift.selector("bc", "${APP_NAME}").object()
+                                    // buildConfig.spec.output.to.name = "${IMAGE_NAME}:${NEW_VERSION}" 
+                                    print(buildConfig.spec.output.to.name)
+                                    // openshift.apply(buildConfig)
+                                } else {
+                                    genBuildConfigYaml()
+                                    print('--- Create BuildConfig ---')
+                                    sh "cat buildConfig.yaml"
+                                    openshift.create(readFile('buildConfig.yaml'))
+                                }
+
+                                print('================= Build Image =================')
+                                sh "ls -al ${WORKSPACE}/build/libs/"
+                                
+                                def build = openshift.startBuild(
+                                    "${APP_NAME}", 
+                                    "--from-dir=${WORKSPACE}/build/libs", 
+                                    "--follow",
+                                    "--wait"
+                                )
+                            }
+                        }
+                    }
+                    catch(Exception e) {
+                        println(e.getMessage());
+                        currentBuild.result = 'FAILURE'
+                    }
+                }                          
+            }
+        }
+    }
+}
+
+def genBuildConfigYaml() {
+    sh """
+cat << EOF > buildConfig.yaml
+kind: BuildConfig
+apiVersion: build.openshift.io/v1
+metadata:  
+  name: ${APP_NAME}
+spec:
+  successfulBuildsHistoryLimit: 5
+  failedBuildsHistoryLimit: 5
+  output:
+    to:
+      kind: ImageStreamTag
+      name: ${IMAGE_NAME}:${IMAGE_VERSION} 
+  strategy:
+    type: Source
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        namespace: openshift
+        name: ${BASE_IMAGE}
+  source:
+    type: Binary
+EOF
+"""
+
+// 바이너리 기반 도커 빌드
+
+// kind: BuildConfig
+//   metadata:
+//     labels:
+//       build: "${NAME}"
+//       template: docker-build-template-binary-with-push-secret
+//     name: "${NAME}"
+//   spec:
+//     failedBuildsHistoryLimit: 5
+//     output:
+//       pushSecret:
+//         name: "${PUSH_SECRET}"
+//       to:
+//         kind: DockerImage
+//         name: "${DESTINATION_REPO_NAME}/${DESTINATION_REPO_NAMESPACE}/${DESTINATION_IMAGE_NAME}:${DESTINATION_IMAGE_TAG}"
+//     postCommit: {}
+//     resources: {}
+//     runPolicy: Serial
+//     source:
+//       binary: {}
+//       type: Binary
+//     strategy:
+//       dockerStrategy:
+//         dockerfilePath: "${DOCKERFILE_NAME}"
+//         from:
+//           kind: DockerImage
+//           name: "${BUILDER_IMAGE_NAME}"
+//       type: Docker
+//     successfulBuildsHistoryLimit: 5
+//     triggers: []
+
+
+// def genBuildConfigYaml() {
+//     sh """
+// cat << EOF > buildConfig.yaml
+// kind: BuildConfig
+// apiVersion: build.openshift.io/v1
+// metadata:  
+//   name: ${APP_NAME}
+// spec:
+//   successfulBuildsHistoryLimit: 5
+//   failedBuildsHistoryLimit: 5
+//   output:
+//     to:
+//       kind: ImageStreamTag
+//       name: ${IMAGE_NAME}:${IMAGE_VERSION}      
+//   strategy:
+//     type: Source
+//     sourceStrategy:
+//       from:
+//         kind: ImageStreamTag
+//         namespace: openshift
+//         name: ${BASE_IMAGE}
+//   source:
+//     type: Binary
+// EOF
+// """
+}
