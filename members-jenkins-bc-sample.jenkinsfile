@@ -3,6 +3,9 @@ import groovy.transform.Field
 String CLUSTER = "ocp4-hub"
 String PROJECT = "sample-app"
 
+String MANIFEST_GIT_URL = "https://gitlab.consulting.redhat.com/edwin-projects/app-config-sample.git"
+String GIT_CREDENTIAL = "pipeline"
+
 String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
 String SONAR_PROJECT_KEY = "members"
 String SONAR_TOKEN = "squ_787d552946802ab60eb36acf8e13eddff20feb41"
@@ -19,6 +22,7 @@ String SONAR_JAVA_BINARIES = "./build/"
 // @Field String BASE_IMAGE = "java-runtime:openjdk-17-ubi8"
 @Field String BASE_IMAGE = "java:openjdk-17-ubi8"
 
+@Field String COMMIT_SHA = ""
 
 pipeline {
     agent {
@@ -61,7 +65,8 @@ pipeline {
                 script {
                     try {
                         git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
-                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        COMMIT_SHA = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        print("SHA : ${COMMIT_SHA}")
                         env.gitCloneResult = true
                     }
                     catch(Exception e) {
@@ -171,6 +176,22 @@ pipeline {
                         currentBuild.result = 'FAILURE'
                     }
                 }                          
+            }
+        }
+        stage('gitops') {
+            steps {            
+                script {
+                    try {
+                        git url: "${MANIFEST_GIT_URL}", branch: 'main', credentialsId: "${GIT_CREDENTIAL}"
+                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        env.gitCloneResult = true
+                    }
+                    catch(Exception e) {
+                        //cleanWs()
+                        //PrintErrorMessage(e)
+                        currentBuild.result = 'FAILURE'
+                    }
+                }
             }
         }
     }
