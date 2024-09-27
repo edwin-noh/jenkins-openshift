@@ -1,0 +1,111 @@
+kind: DeploymentConfig
+apiVersion: apps.openshift.io/v1
+metadata:
+  name: jenkins  
+  labels:
+    app: jenkins-persistent      
+spec:
+  strategy:
+    type: Recreate
+    recreateParams:
+      timeoutSeconds: 600
+    resources: {}
+    activeDeadlineSeconds: 21600
+  triggers:
+    - type: ImageChange
+      imageChangeParams:
+        automatic: true
+        containerNames:
+          - jenkins
+        from:
+          kind: ImageStreamTag
+          namespace: jenkins
+          name: 'custom-jenkins:latest'        
+    - type: ConfigChange
+  replicas: 1
+  revisionHistoryLimit: 10
+  test: false
+  selector:
+    name: jenkins
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        name: jenkins
+    spec:
+      restartPolicy: Always
+      serviceAccountName: jenkins
+      schedulerName: default-scheduler
+      terminationGracePeriodSeconds: 30
+      securityContext: {}
+      containers:
+        - resources:
+            limits:
+              memory: 2Gi
+          readinessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 3
+            timeoutSeconds: 240
+            periodSeconds: 10
+            successThreshold: 1
+            failureThreshold: 3
+          terminationMessagePath: /dev/termination-log
+          name: jenkins
+          livenessProbe:
+            httpGet:
+              path: /login
+              port: 8080
+              scheme: HTTP
+            initialDelaySeconds: 420
+            timeoutSeconds: 240
+            periodSeconds: 360
+            successThreshold: 1
+            failureThreshold: 2
+          env:
+            - name: OPENSHIFT_ENABLE_OAUTH
+              value: 'true'
+            - name: OPENSHIFT_ENABLE_REDIRECT_PROMPT
+              value: 'true'
+            - name: DISABLE_ADMINISTRATIVE_MONITORS
+              value: 'false'
+            - name: KUBERNETES_MASTER
+              value: 'https://kubernetes.default:443'
+            - name: KUBERNETES_TRUST_CERTIFICATES
+              value: 'true'
+            - name: JENKINS_SERVICE_NAME
+              value: jenkins
+            - name: JNLP_SERVICE_NAME
+              value: jenkins-jnlp
+            - name: ENABLE_FATAL_ERROR_LOG_FILE
+              value: 'false'
+            - name: JENKINS_UC_INSECURE
+              value: 'false'
+            - name: CASC_JENKINS_CONFIG
+              value: /var/lib/jenkins/proxy.yaml
+            - name: JAVA_FIPS_OPTIONS
+              value: '-Dcom.redhat.fips=false'
+          securityContext:
+            capabilities: {}
+            privileged: false
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - name: jenkins-data
+              mountPath: /var/lib/jenkins
+            - name: jenkins-trusted-ca-bundle
+              mountPath: /etc/pki/ca-trust/source/anchors
+          terminationMessagePolicy: File
+          image: 'image-registry.openshift-image-registry.svc:5000/jenkins/custom-jenkins:latest'
+      serviceAccount: jenkins
+      volumes:
+        - name: jenkins-data
+          persistentVolumeClaim:
+            claimName: jenkins
+        - name: jenkins-trusted-ca-bundle
+          configMap:
+            name: jenkins-trusted-ca-bundle
+            defaultMode: 420
+            optional: true
+      dnsPolicy: ClusterFirst
