@@ -1,0 +1,20 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: custom-jenkins-build
+spec:
+  source:                       
+    git:
+      uri: https://github.com/edwin-noh/jenkins-openshift/jenkins-config
+    type: Git
+  strategy:                     
+    sourceStrategy:
+      from:
+        kind: ImageStreamTag
+        name: jenkins:2
+        namespace: openshift
+    type: Source
+  output:                       
+    to:
+      kind: ImageStreamTag
+      name: custom-jenkins:latest
