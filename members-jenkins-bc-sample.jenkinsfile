@@ -4,7 +4,7 @@ String CLUSTER = "ocp4-hub"
 String PROJECT = "sample-app"
 
 String MANIFEST_GIT_URL = "https://gitlab.consulting.redhat.com/edwin-projects/app-config-sample.git"
-String GIT_CREDENTIAL = "pipeline"
+String GIT_CREDENTIAL = "rh-gitlab"
 
 String SONAR_HOST_URL = "http://sonarqube-sonarqube.sonarqube.svc.cluster.local:9000"
 String SONAR_PROJECT_KEY = "members"
@@ -24,6 +24,8 @@ String SONAR_JAVA_BINARIES = "./build/"
 
 @Field String COMMIT_SHA = ""
 
+@Field String MANIFEST_FILE_PATH = "apps/petclinic-sample/overlays"
+
 pipeline {
     agent {
         kubernetes {
@@ -39,16 +41,16 @@ pipeline {
             spec:
                 serviceAccountName: jenkins
                 containers:
-                - name: jnlp
-                  image: registry.redhat.io/ocp-tools-4/jenkins-agent-base-rhel8:v4.13.0-1686680363
-                  tty: false
-                  imagePullPolicy: Always
-                  args:
-                    - $(JENKINS_SECRET)
-                    - $(JENKINS_NAME)
-                  env:
-                    - name: CONTAINER_HEAP_PERCENT
-                      value: 0.5                    
+                // - name: jnlp
+                //   image: registry.redhat.io/ocp-tools-4/jenkins-agent-base-rhel8:v4.13.0-1686680363
+                //   tty: false
+                //   imagePullPolicy: Always
+                //   args:
+                //     - $(JENKINS_SECRET)
+                //     - $(JENKINS_NAME)
+                //   env:
+                //     - name: CONTAINER_HEAP_PERCENT
+                //       value: 0.5                    
                 - name: builder
                   image: quay.apps.ocp4-hub.edwin.home/members/jenkins-builder:1.0
                   tty: true
@@ -59,13 +61,19 @@ pipeline {
             '''
         }
     }
+
+    environment {
+        GIT_CREDENTIALS_ID = 'rh-gitlab' // Use the ID of the credentials you saved in Jenkins
+        BRANCH = 'main'
+    }
+
     stages {
         stage('checkout') {
             steps {            
                 script {
                     try {
-                        git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "rh-gitlab"
-                        COMMIT_SHA = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        git url: 'https://gitlab.consulting.redhat.com/edwin-projects/springboot-sample.git', branch: 'main', credentialsId: "${GIT_CREDENTIAL}"
+                        COMMIT_SHA = sh(returnStdout: true, script: "git rev-parse  --short HEAD").trim()
                         print("SHA : ${COMMIT_SHA}")
                         env.gitCloneResult = true
                     }
@@ -183,12 +191,34 @@ pipeline {
                 script {
                     try {
                         git url: "${MANIFEST_GIT_URL}", branch: 'main', credentialsId: "${GIT_CREDENTIAL}"
-                        GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
+                        // GIT_COMMIT = sh(returnStdout: true, script: "git rev-parse HEAD").trim()
                         env.gitCloneResult = true
+
+                        sh "ls -al"
+
+                        // Update Version
+                        sh("sed -i 's/\\(newTag: \\).*/\\1${COMMIT_SHA}/' ${MANIFEST_FILE_PATH}/kustomization.yaml")
+                        // sh("yq -i '.image.newTag=${COMMIT_SHA}' '${MANIFEST_FILE_PATH}/kustomization.yaml'")
+                        
+                        sh "cat ${MANIFEST_FILE_PATH}/kustomization.yaml"
+                        // sh("sed -i 's!newTag: .*!newTag: ${NEW_VERSION}!g' ${GO_REPO_PATH}/kustomization.yaml")
+                        // sh("sed -i '0,/\"value\":.*/s//\"value\": \"${NEW_VERSION}\"/' ${GO_REPO_PATH}/rollout-patch.json")
+                        withCredentials([string(credentialsId: 'gitlab-token', variable: 'password')]) {
+                            sh("""
+                            git config --global user.name "Edwin Noh"
+                            git config --global user.email "gunoh@redhat.com"
+                            git add ${MANIFEST_FILE_PATH}/kustomization.yaml
+                            git commit -m 'image version : ${COMMIT_SHA} from Jenkins'        
+                            git push https://jenkins:${password}@gitlab.consulting.redhat.com/edwin-projects/app-config-sample.git main
+                            """)    
+                        }
+                        
+                        // git config --local credential.helper "!f() { echo username=\\$GIT_ACCESS_USR; echo password=\\$GIT_ACCESS_PSW; }; f"    
                     }
                     catch(Exception e) {
                         //cleanWs()
                         //PrintErrorMessage(e)
+                        println(e.getMessage());
                         currentBuild.result = 'FAILURE'
                     }
                 }

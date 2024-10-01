@@ -155,3 +155,12 @@ pipeline {
         }
     }
 }
+
+def genDockerfile(jarFile) {
+    sh """
+cat << EOF > Dockerfile
+FROM quay.apps.ocp4-hub.edwin.home/members/openjdk-17:1.20
+COPY ${jarFile} /deployments/app.jar
+ENTRYPOINT ["java","-jar","/deployments/app.jar"]
+EOF
+"""
