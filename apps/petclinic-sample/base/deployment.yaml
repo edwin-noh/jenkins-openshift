@@ -1,0 +1,37 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: springboot-petclinic-sample
+  namespace: sample-app  
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: springboot-petclinic-sample
+  template:
+    metadata:
+      labels:
+        app: springboot-petclinic-sample
+    spec:
+      containers:
+        - name: container
+          image: 'image-registry.openshift-image-registry.svc:5000/sample-app/springboot-petclinic-sample:latest'
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: Always
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600

@@ -1,0 +1,14 @@
+kind: Route
+apiVersion: route.openshift.io/v1
+metadata:
+  name: springboot-petclinic-sample
+  namespace: sample-app
+spec:
+  host: springboot-petclinic-sample-sample-app.apps.ocp4-hub.edwin.home
+  to:
+    kind: Service
+    name: springboot-petclinic-sample
+    weight: 100
+  port:
+    targetPort: 8080
+  wildcardPolicy: None

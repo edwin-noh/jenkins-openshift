@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: springboot-petclinic-sample
+  namespace: sample-app
+spec:
+  selector:
+    app: springboot-petclinic-sample
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080

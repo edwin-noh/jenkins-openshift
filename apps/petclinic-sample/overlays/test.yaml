@@ -1,0 +1,7 @@
+resources:
+  - ../base
+images:
+  - name: image-registry.openshift-image-registry.svc:5000/openshift/httpd
+    newName: alpine
+    newTag: 4
+    sed "s/newTag:.*/newTag: 4/" kustomization.yaml > test.yaml
